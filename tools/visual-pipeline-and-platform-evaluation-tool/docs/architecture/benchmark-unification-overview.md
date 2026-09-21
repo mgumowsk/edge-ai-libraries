@@ -31,6 +31,37 @@ cost of every fix.
 
 **One Benchmark Engine, two thin clients.**
 
+# Proposed direction
+
+## One Benchmark Engine, two thin clients
+
+- Move planning and execution into the **ViPPET backend**
+- Use the same engine from:
+  - the existing web UI
+  - the new `vippet-bench` CLI
+- Persist UI- and CLI-initiated runs in the same database
+- Retire the pytest performance suite after CLI smoke coverage is added
+
+**Result:** one source of truth for planning, execution, retries, KPIs, and results.
+
+---
+
+# Target architecture
+
+```mermaid
+graph LR
+    UI[Web UI] --> API[ViPPET Backend]
+    CLI[vippet-bench CLI] --> API
+    API --> Planner[Benchmark Planner]
+    API --> Manager[Benchmark Manager]
+    Manager --> Tests[Pipeline/Test Runner]
+    Manager --> Metrics[KPI Collector]
+    API --> DB[(Run Database)]
+    API --> Export[JSON / CSV / HTML]
+```
+
+
+
 - The **Benchmark Engine lives in the `vippet` backend** and becomes the single execution path.
   It generalises today's `BenchmarkManager` from "run a seeded suite" to "run a *RunSpec*"
   (pipelines × variants × streams + filters + customer pipelines + execution policy).

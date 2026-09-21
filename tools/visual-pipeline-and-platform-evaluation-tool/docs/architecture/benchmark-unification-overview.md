@@ -122,3 +122,36 @@ graph LR
 **Optional**
 - UI: Custom-run wizard, skipped-reason/attempts columns, JSON/HTML download.
 
+## 5. Acceptance-criteria coverage
+
+The unified runner must satisfy the following contract:
+
+- **Matrix:** When no filters are supplied, plan every discovered eligible pipeline, supported
+  model combination, hardware variant, and requested stream count. Filters must restrict the
+  matrix without scheduling excluded items.
+- **Pre-flight:** Before creating jobs, `vippet-bench` verifies local Python dependencies, checks
+  that the configured VIPPET base URL is reachable and ready, and stops with an actionable error
+  if readiness is not achieved within the configured timeout.
+- **Configuration:** YAML supports the API URL, request and polling timeouts, maximum job duration,
+  pipeline/variant/model filters, stream counts, retries, results directory, output formats,
+  metrics endpoint, and sampling interval. CLI options override YAML values.
+- **KPIs:** Sampling runs throughout each job window and aggregates CPU utilization/frequency/
+  temperature, memory usage, GPU engine utilization/frequency/power, package power, and NPU
+  utilization/frequency/power/temperature using average, minimum, and maximum where available.
+- **Results:** Each run writes a unique timestamped directory containing JSON and CSV exports and
+  updates a `latest` symlink. JSON includes the benchmark ID, timestamp, total duration, effective
+  configuration, discovered hardware, system information, summary counts, and complete per-test
+  results including errors and hardware metrics.
+- **Reports:** HTML includes total and pass/fail/skipped counts, pipeline throughput comparisons,
+  available KPI visualizations, and per-test results. `--report-only` regenerates a report from one
+  or more existing JSON files without contacting VIPPET.
+- **Customer pipelines:** A customer selects registered VIPPET pipelines by ID or name in YAML or
+  CLI arguments. They may run alone or with built-in pipelines, using the same variant, stream,
+  model-validation, retry, export, and reporting options. The planner validates existence and
+  compatibility; missing pipelines are either skipped or fail the run according to configuration.
+  Customer pipelines retain the exact VIPPET ID/name in the matrix, logs, JSON, CSV, and HTML.
+- **Operator feedback and exit status:** The CLI prints readiness, discovered hardware, skips and
+  reasons, the planned matrix, per-test progress, the final summary, and output locations. It
+  exits non-zero for fatal errors or any failed test and exits zero only for a fully successful run.
+
+

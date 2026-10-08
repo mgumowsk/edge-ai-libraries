@@ -314,6 +314,16 @@ or `NPU`, independently per model.
 | `NPU_RERANKER_BATCH` | `2` | Static batch size of the reranker on NPU. |
 | `NPU_ENCODER_SEQ_LEN` | `512` | Static sequence length of the embedding model and reranker on NPU. |
 
+Embedding model output (`model_settings`, OpenVINO runtime). The defaults keep the stock
+behaviour; models such as EmbeddingGemma need mean pooling and their own task prefixes.
+
+| Setting | Default | Description |
+|---|---|---|
+| `EMBEDDING_POOLING` | `cls` | `cls` (first token) or `mean` (mean over the attention mask). Embeddings are always L2-normalized. |
+| `EMBEDDING_QUERY_PREFIX` | LangChain BGE prefix | Text prepended to retrieval queries. |
+| `EMBEDDING_DOCUMENT_PREFIX` | none | Text prepended to document chunks before indexing. |
+| `EMBEDDING_INFERENCE_PRECISION` | device default | OpenVINO `INFERENCE_PRECISION_HINT` of the embedding model on CPU and GPU, for example `f32` for models that overflow in fp16. |
+
 ### `GET /ollama-models` (Ollama runtime)
 
 Returns the list of currently loaded Ollama models.

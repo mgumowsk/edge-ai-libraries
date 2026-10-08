@@ -416,6 +416,95 @@ def test_encoder_compile_per_device(mocker):
     assert (config.NPU_EMBEDDING_BATCH, config.NPU_RERANKER_BATCH, config.NPU_ENCODER_SEQ_LEN) == (4, 2, 512)
 
 
+def test_encoder_precision_hint_skips_npu():
+    from app import openvino_backend
+
+    backend = openvino_backend.OpenVINOBackend()
+    backend.cache_dir = "/cache"
+
+    assert backend._encoder_kwargs("org/emb", "GPU", "f32")["ov_config"] == {"INFERENCE_PRECISION_HINT": "f32"}
+    assert backend._encoder_kwargs("org/emb", "NPU", "f32")["ov_config"] == {"CACHE_DIR": "/cache/org/emb/model_cache"}
+
+
+def test_embedding_kwargs_default_to_stock_behaviour(tmp_path, mocker):
+    from app import openvino_backend
+
+    mocker.patch.object(openvino_backend.AutoConfig, "from_pretrained")
+    backend = openvino_backend.OpenVINOBackend()
+    backend.cache_dir = str(tmp_path)
+    backend.embedding_device = "GPU"
+
+    kwargs = backend._embedding_kwargs()
+
+    assert kwargs["encode_kwargs"] == {"mean_pooling": False, "normalize_embeddings": True}
+    assert kwargs["model_kwargs"] == {"device": "GPU", "compile": False}
+    assert "query_instruction" not in kwargs and "embed_instruction" not in kwargs
+
+
+def test_embedding_kwargs_mean_pooling_prefixes_and_plain_config(tmp_path, mocker):
+    from app import openvino_backend
+
+    model_dir = tmp_path / "org" / "emb"
+    model_dir.mkdir(parents=True)
+    (model_dir / "config.json").write_text(json.dumps({"model_type": "newer_text", "embedding_dim": 768}))
+    mocker.patch.object(openvino_backend.AutoConfig, "from_pretrained", side_effect=ValueError("unknown model_type"))
+    for key, value in {
+        "EMBEDDING_POOLING": "mean",
+        "EMBEDDING_QUERY_PREFIX": "task: search result | query: ",
+        "EMBEDDING_DOCUMENT_PREFIX": "title: none | text: ",
+        "EMBEDDING_INFERENCE_PRECISION": "f32",
+    }.items():
+        mocker.patch.object(openvino_backend.config, key, value)
+    backend = openvino_backend.OpenVINOBackend()
+    backend.cache_dir = str(tmp_path)
+    backend.embedding_model_id = "org/emb"
+    backend.embedding_device = "CPU"
+
+    kwargs = backend._embedding_kwargs()
+
+    assert kwargs["model_name_or_path"] == str(model_dir)
+    assert kwargs["encode_kwargs"] == {"mean_pooling": True, "normalize_embeddings": True}
+    assert kwargs["query_instruction"] == "task: search result | query: "
+    assert kwargs["embed_instruction"] == "title: none | text: "
+    model_kwargs = kwargs["model_kwargs"]
+    assert model_kwargs["ov_config"] == {"INFERENCE_PRECISION_HINT": "f32"}
+    assert type(model_kwargs["config"]) is transformers.PretrainedConfig
+    assert model_kwargs["config"].embedding_dim == 768
+
+
+def test_mean_pooled_prefixed_embeddings():
+    """LangChain applies the configured prefixes and mean pooling to the encoder output."""
+    from langchain_community.embeddings import OpenVINOBgeEmbeddings
+
+    class Tokenizer:
+        def __call__(self, texts, **kwargs):
+            self.texts = list(texts)
+            ids = torch.tensor([[1, 2, 0], [3, 0, 0]][: len(texts)])
+            return {"input_ids": ids, "attention_mask": (ids > 0).long()}
+
+    class Encoder:
+        request = types.SimpleNamespace(inputs=[types.SimpleNamespace(get_partial_shape=lambda: [-1, _Dynamic()])])
+
+        def __call__(self, input_ids, attention_mask):
+            return BaseModelOutput(last_hidden_state=torch.stack([input_ids.float(), torch.ones_like(input_ids).float()], -1))
+
+    class _Dynamic:
+        is_dynamic = True
+
+    emb = OpenVINOBgeEmbeddings.model_construct(
+        ov_model=Encoder(), tokenizer=Tokenizer(), model_name_or_path="m", model_kwargs={}, show_progress=False,
+        encode_kwargs={"mean_pooling": True, "normalize_embeddings": False},
+        query_instruction="q: ", embed_instruction="d: ",
+    )
+
+    vectors = emb.embed_documents(["first"])
+    assert emb.tokenizer.texts == ["d: first"]
+    # Mean over the unmasked tokens only: (1 + 2) / 2.
+    assert vectors[0] == [1.5, 1.0]
+    emb.embed_query("question")
+    assert emb.tokenizer.texts == ["q: question"]
+
+
 def test_init_models_uses_genai_for_npu_llm(mocker):
     from app import openvino_backend
 
@@ -430,6 +519,7 @@ def test_init_models_uses_genai_for_npu_llm(mocker):
     mocker.patch.object(backend, "convert_model")
     convert_npu = mocker.patch.object(backend, "convert_npu_llm")
     mocker.patch.object(openvino_backend, "OpenVINOBgeEmbeddings")
+    mocker.patch.object(openvino_backend.AutoConfig, "from_pretrained")
     mocker.patch.object(openvino_backend, "OpenVINOReranker")
     hf_pipeline = mocker.patch.object(openvino_backend, "HuggingFacePipeline")
     load = mocker.patch.object(openvino_backend.GenAILLM, "load", return_value="genai-llm")

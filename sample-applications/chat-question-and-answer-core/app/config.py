@@ -40,6 +40,11 @@ class Settings(BaseSettings):
         NPU_EMBEDDING_BATCH (int): Static batch size of the embedding model on NPU.
         NPU_RERANKER_BATCH (int): Static batch size of the reranker on NPU.
         NPU_ENCODER_SEQ_LEN (int): Static sequence length of the embedding and reranker on NPU.
+        EMBEDDING_POOLING (str): Pooling of the embedding model output, 'cls' or 'mean'.
+        EMBEDDING_QUERY_PREFIX (str | None): Prefix of embedded queries (None: LangChain's BGE default).
+        EMBEDDING_DOCUMENT_PREFIX (str | None): Prefix of embedded document chunks (None: none).
+        EMBEDDING_INFERENCE_PRECISION (str): OpenVINO INFERENCE_PRECISION_HINT of the embedding
+            model on CPU and GPU (empty: device default).
 
     Private Attributes:
         _ENABLE_RERANK (bool): Whether reranking is enabled.
@@ -95,6 +100,11 @@ class Settings(BaseSettings):
     NPU_EMBEDDING_BATCH: int = 4
     NPU_RERANKER_BATCH: int = 2
     NPU_ENCODER_SEQ_LEN: int = 512
+    # Embedding output handling; the defaults keep the stock behaviour (CLS token, BGE query prefix).
+    EMBEDDING_POOLING: str = "cls"
+    EMBEDDING_QUERY_PREFIX: Union[str, None] = None
+    EMBEDDING_DOCUMENT_PREFIX: Union[str, None] = None
+    EMBEDDING_INFERENCE_PRECISION: str = ""
 
     # These fields will not be affected by environment variables
     _ENABLE_RERANK: bool = PrivateAttr(True)
@@ -129,6 +139,8 @@ class Settings(BaseSettings):
 
         self._validate_runtime_settings()
         self._check_and_validate_prompt_template()
+        if self.EMBEDDING_POOLING not in ("cls", "mean"):
+            raise ValueError(f"EMBEDDING_POOLING must be 'cls' or 'mean', got {self.EMBEDDING_POOLING!r}")
 
     def _validate_runtime_settings(self):
         validators = {

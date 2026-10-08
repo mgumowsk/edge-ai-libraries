@@ -7,7 +7,7 @@ from optimum.intel import (
     OVModelForSequenceClassification,
     OVModelForCausalLM,
 )
-from transformers import AutoTokenizer
+from transformers import AutoConfig, AutoTokenizer, PretrainedConfig
 from openvino_tokenizers import convert_tokenizer
 from langchain_community.embeddings import OpenVINOBgeEmbeddings
 from langchain_community.document_compressors.openvino_rerank import OpenVINOReranker
@@ -198,11 +198,34 @@ class OpenVINOBackend:
         ov.save_model(ov_tokenizer, os.path.join(model_path, "openvino_tokenizer.xml"))
         ov.save_model(ov_detokenizer, os.path.join(model_path, "openvino_detokenizer.xml"))
 
-    def _encoder_kwargs(self, model_id: str, device: str) -> dict:
+    def _encoder_kwargs(self, model_id: str, device: str, precision: str = "") -> dict:
         kwargs = {"device": device, "compile": False}
         if device == "NPU":
             # NPU compilation takes seconds to minutes; reuse the compiled blob across restarts.
             kwargs["ov_config"] = {"CACHE_DIR": os.path.join(self.cache_dir, model_id, "model_cache")}
+        elif precision:
+            kwargs["ov_config"] = {"INFERENCE_PRECISION_HINT": precision}
+        return kwargs
+
+    def _embedding_kwargs(self) -> dict:
+        model_dir = os.path.join(self.cache_dir, self.embedding_model_id)
+        kwargs = {
+            "model_name_or_path": model_dir,
+            "model_kwargs": self._encoder_kwargs(
+                self.embedding_model_id, self.embedding_device, config.EMBEDDING_INFERENCE_PRECISION
+            ),
+            "encode_kwargs": {"mean_pooling": config.EMBEDDING_POOLING == "mean", "normalize_embeddings": True},
+        }
+        try:
+            AutoConfig.from_pretrained(model_dir)
+        except (KeyError, ValueError):
+            # An IR exported with a newer transformers (unknown model_type): the encoder needs no
+            # architecture-specific config, so load the plain one.
+            kwargs["model_kwargs"]["config"] = PretrainedConfig.from_json_file(os.path.join(model_dir, "config.json"))
+        if config.EMBEDDING_QUERY_PREFIX is not None:
+            kwargs["query_instruction"] = config.EMBEDDING_QUERY_PREFIX
+        if config.EMBEDDING_DOCUMENT_PREFIX is not None:
+            kwargs["embed_instruction"] = config.EMBEDDING_DOCUMENT_PREFIX
         return kwargs
 
     def _compile_encoder(self, model, device: str, npu_batch: int):
@@ -239,10 +262,7 @@ class OpenVINOBackend:
             self.convert_npu_llm(self.llm_model_id, self.llm_npu_model_dir)
 
         # Initialize embedding model
-        embedding = OpenVINOBgeEmbeddings(
-            model_name_or_path = os.path.join(self.cache_dir, self.embedding_model_id),
-            model_kwargs = self._encoder_kwargs(self.embedding_model_id, self.embedding_device),
-        )
+        embedding = OpenVINOBgeEmbeddings(**self._embedding_kwargs())
         embedding.ov_model = self._compile_encoder(
             embedding.ov_model, self.embedding_device, config.NPU_EMBEDDING_BATCH
         )

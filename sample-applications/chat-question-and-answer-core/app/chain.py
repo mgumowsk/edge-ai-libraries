@@ -17,7 +17,15 @@ import pandas as pd
 
 vectorstore = None
 # Set from init_models() below; stays None when RUN_TEST bypasses model loading.
+embedding = None
 llm = None
+
+CHUNK_SIZE = 1000
+CHUNK_OVERLAP = 200
+# Bump when the saved index layout or the document loading changes.
+INDEX_SCHEMA = 1
+INDEX_FILE = "index.bin"
+FINGERPRINT_FILE = "fingerprint.json"
 
 # One OpenVINO infer request serves the LLM: generations must not overlap.
 _generation_lock = threading.Lock()
@@ -436,7 +444,101 @@ async def process_query_with_sources(query: str = ""):
         yield sse_data(chunk)
 
 
-def create_faiss_vectordb(file_path: str = "", chunk_size=1000, chunk_overlap=200):
+def index_fingerprint() -> dict:
+    """
+    Settings a saved index depends on. The embedding device is left out on purpose:
+    CPU, GPU and NPU produce interchangeable vectors for the same model.
+    """
+
+    return {
+        "schema": INDEX_SCHEMA,
+        "embedding_model_id": config.EMBEDDING_MODEL_ID,
+        "embedding_pooling": config.EMBEDDING_POOLING,
+        "embedding_query_prefix": config.EMBEDDING_QUERY_PREFIX,
+        "embedding_document_prefix": config.EMBEDDING_DOCUMENT_PREFIX,
+        "embedding_inference_precision": config.EMBEDDING_INFERENCE_PRECISION,
+        "chunk_size": CHUNK_SIZE,
+        "chunk_overlap": CHUNK_OVERLAP,
+    }
+
+
+def _write_atomic(path: str, data: bytes) -> None:
+    tmp = f"{path}.tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def _remove(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def save_index() -> None:
+    """Saves the vectorstore to INDEX_DIR; a no-op when INDEX_DIR is not set."""
+
+    if not config.INDEX_DIR or vectorstore is None:
+        return
+
+    os.makedirs(config.INDEX_DIR, exist_ok=True)
+    if not vectorstore.docstore._dict:
+        # Restart with no index, as without INDEX_DIR, rather than an empty one.
+        _remove(os.path.join(config.INDEX_DIR, FINGERPRINT_FILE))
+        _remove(os.path.join(config.INDEX_DIR, INDEX_FILE))
+        return
+    # Index first: a crash before the fingerprint is written leaves an index that is dropped at load.
+    _write_atomic(os.path.join(config.INDEX_DIR, INDEX_FILE), vectorstore.serialize_to_bytes())
+    _write_atomic(
+        os.path.join(config.INDEX_DIR, FINGERPRINT_FILE),
+        json.dumps(index_fingerprint(), sort_keys=True).encode(),
+    )
+
+
+def load_index() -> None:
+    """
+    Loads the vectorstore saved in INDEX_DIR. A missing, unreadable or stale index
+    (different fingerprint) is removed and the vectorstore starts empty.
+    """
+
+    global vectorstore
+
+    if not config.INDEX_DIR:
+        return
+
+    index_path = os.path.join(config.INDEX_DIR, INDEX_FILE)
+    fingerprint_path = os.path.join(config.INDEX_DIR, FINGERPRINT_FILE)
+    if not os.path.isfile(index_path):
+        return
+
+    try:
+        with open(fingerprint_path, encoding="utf-8") as f:
+            saved = json.load(f)
+    except (OSError, ValueError):
+        saved = None
+
+    if saved == index_fingerprint():
+        try:
+            with open(index_path, "rb") as f:
+                # INDEX_DIR is written only by this service.
+                vectorstore = FAISS.deserialize_from_bytes(
+                    f.read(), embedding, allow_dangerous_deserialization=True
+                )
+            logger.info(f"Loaded FAISS index from {index_path} ({len(vectorstore.docstore._dict)} chunks).")
+            return
+        except Exception:
+            logger.exception(f"Could not load FAISS index from {index_path}; starting empty.")
+    else:
+        logger.info("Saved FAISS index was built with other embedding or chunking settings; starting empty.")
+
+    _remove(fingerprint_path)
+    _remove(index_path)
+
+
+def create_faiss_vectordb(file_path: str = "", chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP):
     """
     Creates a FAISS vector database from a document file.
     This function loads a document from the specified file path, splits it into chunks,
@@ -471,6 +573,8 @@ def create_faiss_vectordb(file_path: str = "", chunk_size=1000, chunk_overlap=20
         vectorstore = doc_embedding
     else:
         vectorstore.merge_from(doc_embedding)
+
+    save_index()
 
     return True
 
@@ -539,5 +643,10 @@ def delete_embedding_from_vectordb(document: str = "", delete_all: bool = False)
         chunk_list = vectordf.loc[vectordf["document"] == document]["chunk_id"].tolist()
 
     vectorstore.delete(chunk_list)
+    save_index()
 
     return True
+
+
+if os.getenv("RUN_TEST", "").lower() != "true":
+    load_index()

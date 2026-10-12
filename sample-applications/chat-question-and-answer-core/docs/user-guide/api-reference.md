@@ -324,6 +324,22 @@ behaviour; models such as EmbeddingGemma need mean pooling and their own task pr
 | `EMBEDDING_DOCUMENT_PREFIX` | none | Text prepended to document chunks before indexing. |
 | `EMBEDDING_INFERENCE_PRECISION` | device default | OpenVINO `INFERENCE_PRECISION_HINT` of the embedding model on CPU and GPU, for example `f32` for models that overflow in fp16. |
 
+### Persistent index
+
+By default the FAISS index lives in memory and is lost on restart. With `INDEX_DIR` set
+(environment variable or `model_settings`), the index is saved to that directory after every
+upload and delete and loaded at startup, so documents do not need to be ingested again.
+
+The saved index records the embedding model, the embedding output settings above and the
+chunking. When any of them differs at startup, the saved index is deleted and the service starts
+with an empty index. The embedding device is not recorded: CPU, GPU and NPU vectors of the same
+model are interchangeable. Only this service should write to `INDEX_DIR`: the index is loaded
+with pickle.
+
+| Setting | Default | Description |
+|---|---|---|
+| `INDEX_DIR` | empty (in memory only) | Directory for `index.bin` and `fingerprint.json`. |
+
 ### `GET /ollama-models` (Ollama runtime)
 
 Returns the list of currently loaded Ollama models.

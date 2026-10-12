@@ -45,6 +45,9 @@ class Settings(BaseSettings):
         EMBEDDING_DOCUMENT_PREFIX (str | None): Prefix of embedded document chunks (None: none).
         EMBEDDING_INFERENCE_PRECISION (str): OpenVINO INFERENCE_PRECISION_HINT of the embedding
             model on CPU and GPU (empty: device default).
+        INDEX_DIR (str): Directory where the FAISS index is saved after every change and loaded
+            at startup (empty: in memory only). The saved index is dropped when the embedding
+            settings or the chunking differ from the ones it was built with.
 
     Private Attributes:
         _ENABLE_RERANK (bool): Whether reranking is enabled.
@@ -105,6 +108,7 @@ class Settings(BaseSettings):
     EMBEDDING_QUERY_PREFIX: Union[str, None] = None
     EMBEDDING_DOCUMENT_PREFIX: Union[str, None] = None
     EMBEDDING_INFERENCE_PRECISION: str = ""
+    INDEX_DIR: str = ""
 
     # These fields will not be affected by environment variables
     _ENABLE_RERANK: bool = PrivateAttr(True)

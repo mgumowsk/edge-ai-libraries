@@ -44,6 +44,8 @@ To build the Docker image for the `Chat Q&A Core` application, follow these step
 
        This build the image using OpenVINO toolkit with additional GPU support for accelerated inferencing. It remains compatible with CPU-only systems, offering flexibility across different hardware setups.
 
+       The GPU image also includes the Intel NPU user-space driver (`NPU_DRIVER_VERSION`). Pass `--build-arg USE_NPU=false` to leave it out, or `--build-arg USE_NPU=true` to add it to the CPU-only image.
+
    - **Ollama framework**
 
      - CPU-only inferencing

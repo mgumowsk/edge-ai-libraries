@@ -5,14 +5,21 @@ FROM python:3.11-slim AS python-base
 # Define a build-time variable to determine if GPU drivers should be installed
 ARG USE_GPU=false
 ARG INSTALL_DRIVER_VERSION="26.09.37435"
+# NPU user-space driver, installed with the GPU drivers by default
+ARG USE_NPU=${USE_GPU}
+ARG NPU_DRIVER_VERSION="1.38.0"
 ARG UID=1000
 ARG GID=1000
 
 RUN echo "USE_GPU is set to $USE_GPU"
 
 # Copy drivers and set execute permission on sh files
-COPY ./drivers/install_gpu_drivers.sh /tmp/drivers/install_gpu_drivers.sh
-RUN chmod +x /tmp/drivers/install_gpu_drivers.sh
+COPY ./drivers/install_gpu_drivers.sh ./drivers/install_npu_drivers.sh /tmp/drivers/
+RUN chmod +x /tmp/drivers/install_gpu_drivers.sh /tmp/drivers/install_npu_drivers.sh
+
+RUN if [ "$USE_NPU" = "true" ]; then \
+    /tmp/drivers/install_npu_drivers.sh; \
+    fi
 
 # Install GPU drivers if required
 RUN if [ "$USE_GPU" = "true" ]; then \

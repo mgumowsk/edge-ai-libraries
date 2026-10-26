@@ -300,7 +300,8 @@ Related settings (same `model_settings` section or environment variables):
 or `NPU`, independently per model.
 
 - On `NPU`, the LLM runs through OpenVINO GenAI from an int4 channel-wise export in
-  `LLM_NPU_MODEL_DIR` (created at startup when missing; the image needs the NPU user-space driver).
+  `LLM_NPU_MODEL_DIR` (created at startup when missing). The NPU user-space driver ships in the
+  GPU image (`USE_GPU=true`); run the container with `--device /dev/accel` and the render group.
   The embedding model and reranker are compiled with static shapes.
 - NPU jobs (encoder batches and LLM generations) run one at a time with a short gap between
   them, because concurrent or back-to-back jobs of different models fault the NPU. With the LLM
